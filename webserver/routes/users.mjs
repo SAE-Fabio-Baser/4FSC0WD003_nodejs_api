@@ -1,5 +1,9 @@
-export default function(server) {
-    server.get("/users", (_req, res) => {
-        res.sendStatus(200);
-    });
+export default function (server, db) {
+  const collection = db.collection('users')
+
+  // READ get all users
+  server.get('/users', async (_req, res) => {
+    const users = await collection.find({}).toArray()
+    res.send(users)
+  })
 }

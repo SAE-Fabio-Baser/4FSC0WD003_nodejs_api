@@ -1,78 +1,92 @@
-import { v4 as uuidv4 } from "uuid";
+import { ObjectId } from 'mongodb'
+import { faker } from '@faker-js/faker'
+import jwt from 'jsonwebtoken'
 
-export default function(server) {
-    const posts = [];
+export default function (server, db) {
+  const coll = db.collection('posts')
 
-    // READ
-    server.get("/posts", (req, res) => {
-        const { folder } = req.query;
+  // READ
+  server.get('/posts', async (req, res) => {
+    const { page = 1, size = 10 } = req.query
+    const totalPostsCount = await coll.find({}).count()
+    const posts = await coll
+      .find({})
+      .limit(Number(size))
+      .skip((page - 1) * size)
+      .toArray()
 
-        let filteredPosts = [];
-        if (folder) {
-            filteredPosts = posts.filter((post) => post.folder === folder);
-        } else {
-            filteredPosts = posts.filter((post) => post.folder !== "trash");
-        }
+    res.send({
+      total: totalPostsCount,
+      pageSize: size,
+      page,
+      posts: posts,
+    })
+  })
 
-        res.send({
-            folder: folder ?? "all",
-            total: filteredPosts.length,
-            posts: filteredPosts,
-        });
-    });
+  // CREATE
+  server.post('/posts', async (req, res) => {
+    const { title, summary, folder } = req.body
+    const newPost = { title, summary, folder }
 
-    // CREATE
-    server.post("/posts", (req, res) => {
-        const { title, summary, folder } = req.body;
+    const createdPost = await coll.insertOne(newPost)
 
-        const created_at = Date.now();
+    res.send(createdPost)
+  })
 
-        const newPost = {
-            id: uuidv4(),
-            title,
-            summary,
-            folder,
-            created_at,
-            updated_at: created_at,
-        };
-        posts.push(newPost);
+  // UPDATE
+  server.put('/posts/:id', async (req, res) => {
+    const { id } = req.params
+    const { token } = req.query
 
-        res.send(newPost);
-    });
+    if (!token) {
+      res.sendStatus(401)
+      return
+    }
 
-    // UPDATE
-    server.put("/posts/:id", (req, res) => {
-        const { id } = req.params;
-        const { title, summary, folder } = req.body;
+    let valididateToken
+    try {
+      valididateToken = jwt.verify(token, 'geheim')
+    } catch (error) {
+      res.sendStatus(401)
+      return
+    }
 
-        const post = posts.find((post) => post.id === id);
+    if (valididateToken.exp < Date.now() / 1000) {
+      res.sendStatus(403)
+      return
+    }
 
-        post.title = title;
-        post.summary = summary;
-        post.folder = folder;
-        post.updated_at = Date.now();
+    console.log(valididateToken)
+    const { title, summary, folder, content } = req.body
 
-        res.send(post);
-    });
+    const updatedPost = await coll.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { title, summary, folder, content } }
+    )
 
-    // DELETE
-    server.delete("/posts/:id", (req, res) => {
-        const { id } = req.params;
+    res.send(updatedPost)
+  })
 
-        const post = posts.find((post) => post.id === id);
-        post.folder = "trash";
+  // DELETE
+  server.delete('/posts/:id', async (req, res) => {
+    const { id } = req.params
 
-        res.send(post);
-    });
+    const post = await coll.deleteOne({ _id: new ObjectId(id) })
 
-    server.get("/folders", (_req, res) => {
-        const folders = new Set();
+    res.send(post)
+  })
 
-        posts.forEach((post) => post.folder && folders.add(post.folder));
+  server.post('/post/generate', async (req, res) => {
+    const { count = 10 } = req.query
 
-        res.send({
-            total: folders.size,
-            folders: Array.from(folders),
-        });
-    });
+    for (let i = 0; i < count; i++) {
+      coll.insertOne({
+        title: faker.lorem.sentence(3),
+        summary: faker.lorem.paragraph(1),
+        content: faker.lorem.paragraphs(3),
+      })
+    }
+
+    res.sendStatus(200)
+  })
 }
